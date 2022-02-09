@@ -21,8 +21,8 @@ import (
 
 	"github.com/chrislusf/seaweedfs/weed/filesys/meta_cache"
 
-	"github.com/seaweedfs/fuse"
-	"github.com/seaweedfs/fuse/fs"
+	"github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 
 	"github.com/chrislusf/seaweedfs/weed/filesys"
 	"github.com/chrislusf/seaweedfs/weed/glog"
@@ -168,34 +168,42 @@ func RunMount(option *MountOptions, umask os.FileMode) bool {
 
 	mountName := path.Base(dir)
 
-	options := []fuse.MountOption{
-		fuse.VolumeName(mountName),
-		fuse.FSName(*option.filer + ":" + filerMountRootPath),
-		fuse.Subtype("seaweedfs"),
-		// fuse.NoAppleDouble(), // include .DS_Store, otherwise can not delete non-empty folders
-		fuse.NoAppleXattr(),
-		fuse.ExclCreate(),
-		fuse.DaemonTimeout("3600"),
-		fuse.AllowDev(),
-		fuse.AllowSUID(),
-		fuse.DefaultPermissions(),
-		fuse.MaxReadahead(1024 * 512),
-		fuse.AsyncRead(),
-		// fuse.WritebackCache(),
-		// fuse.MaxBackground(1024),
-		// fuse.CongestionThreshold(1024),
+	options := &fs.Options{
+		MountOptions: fuse.MountOptions{
+			AllowOther:               *option.allowOthers,
+			Options:                  nil,
+			MaxBackground:            64,
+			MaxWrite:                 1024 * 512,
+			MaxReadAhead:             1024 * 1024 * 2,
+			IgnoreSecurityLabels:     true,
+			RememberInodes:           false,
+			FsName:                   *option.filer + ":" + filerMountRootPath,
+			Name:                     mountName,
+			SingleThreaded:           false,
+			DisableXAttrs:            false,
+			Debug:                    false,
+			EnableLocks:              false,
+			ExplicitDataCacheControl: true,
+			SyncRead:                 false,
+			DirectMount:              true,
+			DirectMountFlags:         0,
+			EnableAcl:                false,
+		},
+		EntryTimeout:      nil,
+		AttrTimeout:       nil,
+		NegativeTimeout:   nil,
+		FirstAutomaticIno: 0,
+		OnAdd:             nil,
+		NullPermissions:   false,
+		UID:               uid,
+		GID:               gid,
+		ServerCallbacks:   nil,
+		Logger:            nil,
 	}
 
-	options = append(options, osSpecificMountOptions()...)
-	if *option.allowOthers {
-		options = append(options, fuse.AllowOther())
-	}
-	if *option.nonempty {
-		options = append(options, fuse.AllowNonEmptyMount())
-	}
-	if *option.readOnly {
-		options = append(options, fuse.ReadOnly())
-	}
+	//TODO
+	// 1. read only mode
+	// 2. AllowNonEmptyMount
 
 	// find mount point
 	mountRoot := filerMountRootPath
@@ -232,30 +240,22 @@ func RunMount(option *MountOptions, umask os.FileMode) bool {
 	})
 
 	// mount
-	c, err := fuse.Mount(dir, options...)
+	fuse.NewServer(fs.NewNodeFS(), options)
+	server, err := fs.Mount(dir, seaweedFileSystem, options)
 	if err != nil {
 		glog.V(0).Infof("mount: %v", err)
 		return true
 	}
-	defer fuse.Unmount(dir)
+	defer server.Unmount()
 
 	grace.OnInterrupt(func() {
-		fuse.Unmount(dir)
-		c.Close()
+		server.Unmount()
 	})
 
 	glog.V(0).Infof("mounted %s%s to %v", *option.filer, mountRoot, dir)
-	server := fs.New(c, nil)
-	seaweedFileSystem.Server = server
 	seaweedFileSystem.StartBackgroundTasks()
-	err = server.Serve(seaweedFileSystem)
 
-	// check if the mount process has an error to report
-	<-c.Ready
-	if err := c.MountError; err != nil {
-		glog.V(0).Infof("mount process: %v", err)
-		return true
-	}
+	server.Wait()
 
 	return true
 }

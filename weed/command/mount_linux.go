@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/seaweedfs/fuse"
+	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
 const (

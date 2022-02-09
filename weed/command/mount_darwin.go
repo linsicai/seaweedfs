@@ -1,7 +1,7 @@
 package command
 
 import (
-	"github.com/seaweedfs/fuse"
+	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
 func osSpecificMountOptions() []fuse.MountOption {
